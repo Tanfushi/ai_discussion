@@ -555,9 +555,10 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
         repository.update(task_id, waiting_goal_confirmation=False, waiting_expert_selection=True, selection_page=0)
         selection_card = build_expert_selection_card(task_id, record.selected_expert_keys or [], 0)
         try:
-            if record.message_id:
-                feishu_client.patch_message_card(record.message_id, selection_card)
-            return {"toast": {"type": "success", "content": "已进入专家选择，请继续勾选。"}}
+            # 按用户要求：不在原卡内跳转，统一新发卡片，避免闪回旧界面。
+            new_message_id = feishu_client.send_card(record.chat_id, selection_card, receive_id_type="chat_id")
+            repository.update(task_id, message_id=new_message_id, ui_view_mode="progress")
+            return {"toast": {"type": "success", "content": "已发送专家选择新卡片，请在新卡上继续。"}}
         except Exception as exc:
             return {"toast": {"type": "error", "content": f"进入专家选择失败：{str(exc)[:120]}"}}
 
