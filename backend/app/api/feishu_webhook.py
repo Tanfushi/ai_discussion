@@ -59,17 +59,31 @@ def build_progress_card(task_id: str, stage: str, detail: str) -> dict:
 
 def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
     catalog = expert_catalog()
-    options = []
-    for key, expert in list(catalog.items()):
+    selected_names = []
+    toggle_actions = []
+    for key, expert in list(catalog.items())[:12]:
         is_easter = key.startswith("easter_")
         role_type = "彩蛋角色🎊" if is_easter else "专家角色"
-        options.append(
+        selected = key in selected_keys
+        mark = "✅" if selected else "⬜"
+        if selected:
+            selected_names.append(expert.name)
+        toggle_actions.append(
             {
-                "text": {"tag": "plain_text", "content": f"[{role_type}] {expert.name}｜{expert.title}"},
-                "value": key,
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": f"{mark} {expert.name}"},
+                "type": "default",
+                "value": {"action": "toggle_expert", "task_id": task_id, "expert_key": key},
             }
         )
     picked = len(selected_keys)
+    selected_text = "、".join(selected_names) if selected_names else "暂无"
+
+    action_rows = []
+    row_size = 3
+    for i in range(0, len(toggle_actions), row_size):
+        action_rows.append({"tag": "action", "actions": toggle_actions[i : i + row_size]})
+
     return {
         "config": {"update_multi": True},
         "header": {
@@ -81,30 +95,23 @@ def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
             {
                 "tag": "markdown",
                 "content": (
-                    "请先在下拉框中一次性勾选专家（3-5位），再点击“开始讨论”。\n"
-                    "只有点击提交按钮时才会上传你的选择。\n"
-                    "你也可以勾选彩蛋角色（如哆啦A梦🐱、蜡笔小新🖍️）参与讨论，会更可爱更有梗。"
+                    "请点击下方按钮勾选/取消角色，建议选择 3-5 位。\n"
+                    "你也可以勾选彩蛋角色（如哆啦A梦🐱、蜡笔小新🖍️）参与讨论，会更可爱更有梗。\n\n"
+                    f"**当前已选（{picked}）**：{selected_text}"
                 ),
             },
+            *action_rows,
             {
                 "tag": "action",
                 "actions": [
                     {
-                        "tag": "select_static",
-                        "name": "expert_keys",
-                        "placeholder": {"tag": "plain_text", "content": "请选择参与讨论的专家（可多选）"},
-                        "multiple": True,
-                        "options": options,
-                        "value": selected_keys,
-                    },
-                    {
                         "tag": "button",
-                        "text": {"tag": "plain_text", "content": "开始讨论（一次性提交）"},
+                        "text": {"tag": "plain_text", "content": "开始讨论"},
                         "type": "primary",
                         "value": {"action": "confirm_experts", "task_id": task_id},
                     }
                 ],
-            },
+            }
         ],
     }
 
@@ -438,6 +445,18 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
         return {"toast": {"type": "error", "content": "任务不存在或已过期"}}
 
     op = action.get("action")
+    if op == "toggle_expert":
+        expert_key = action.get("expert_key", "")
+        selected = list(record.selected_expert_keys or [])
+        if expert_key in selected:
+            selected = [k for k in selected if k != expert_key]
+        else:
+            selected.append(expert_key)
+        repository.update(task_id, selected_expert_keys=selected)
+        if record.message_id:
+            feishu_client.patch_message_card(record.message_id, build_expert_selection_card(task_id, selected))
+        return {"toast": {"type": "info", "content": f"当前已选 {len(selected)} 位"}}
+
     if op == "confirm_goal":
         repository.update(task_id, waiting_goal_confirmation=False, waiting_expert_selection=True)
         selection_card = build_expert_selection_card(task_id, record.selected_expert_keys or [])
@@ -471,22 +490,7 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
     if op == "confirm_experts":
         if record.waiting_goal_confirmation:
             return {"toast": {"type": "warning", "content": "请先确认讨论议题，再选择专家。"}}
-        form_value = body.get("event", {}).get("action", {}).get("form_value", {})
-        selected_raw = form_value.get("expert_keys", [])
-        if isinstance(selected_raw, str):
-            selected = [selected_raw]
-        elif isinstance(selected_raw, list):
-            # 兼容不同卡片组件返回：["expert_1"] 或 [{"value":"expert_1"}]
-            selected = []
-            for item in selected_raw:
-                if isinstance(item, str):
-                    selected.append(item)
-                elif isinstance(item, dict):
-                    value = item.get("value")
-                    if isinstance(value, str):
-                        selected.append(value)
-        else:
-            selected = []
+        selected = list(record.selected_expert_keys or [])
         repository.update(task_id, selected_expert_keys=selected)
         if len(selected) < 3:
             return {"toast": {"type": "warning", "content": "请至少选择3位专家再开始讨论。"}}
