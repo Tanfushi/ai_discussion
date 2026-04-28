@@ -87,22 +87,53 @@ def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
                 ),
             },
             {
-                "tag": "select_static",
-                "name": "expert_keys",
-                "placeholder": {"tag": "plain_text", "content": "请选择参与讨论的专家（可多选）"},
-                "multiple": True,
-                "options": options,
-                "value": selected_keys,
-            },
-            {
                 "tag": "action",
                 "actions": [
+                    {
+                        "tag": "select_static",
+                        "name": "expert_keys",
+                        "placeholder": {"tag": "plain_text", "content": "请选择参与讨论的专家（可多选）"},
+                        "multiple": True,
+                        "options": options,
+                        "value": selected_keys,
+                    },
                     {
                         "tag": "button",
                         "text": {"tag": "plain_text", "content": "开始讨论（一次性提交）"},
                         "type": "primary",
                         "value": {"action": "confirm_experts", "task_id": task_id},
                     }
+                ],
+            },
+        ],
+    }
+
+
+def build_goal_confirmation_card(task_id: str, query: str) -> dict:
+    return {
+        "config": {"update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "先确认一下讨论议题"},
+            "subtitle": {"tag": "plain_text", "content": f"任务编号：{task_id[:8]}"},
+            "template": "blue",
+        },
+        "elements": [
+            {"tag": "markdown", "content": f"你刚才输入的是：\n\n**{query[:500]}**\n\n这是你想讨论的问题吗？"},
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "是，进入专家选择"},
+                        "type": "primary",
+                        "value": {"action": "confirm_goal", "task_id": task_id},
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "不是，重新输入"},
+                        "type": "default",
+                        "value": {"action": "reject_goal", "task_id": task_id},
+                    },
                 ],
             },
         ],
@@ -381,15 +412,15 @@ async def feishu_webhook(request: Request, background_tasks: BackgroundTasks):
     if record.task_id != task_id:
         return {"ok": True, "task_id": record.task_id, "deduped": True}
 
-    # 默认所有任务都先进入专家选择，确保用户先勾选参与角色再开始讨论。
-    repository.update(task_id, waiting_expert_selection=True, selected_expert_keys=[])
-    selection_card = build_expert_selection_card(task_id, [])
+    # 先确认用户输入是否真的是讨论议题，避免“你好”也直接开会。
+    repository.update(task_id, waiting_goal_confirmation=True, waiting_expert_selection=False, selected_expert_keys=[])
+    confirmation_card = build_goal_confirmation_card(task_id, text)
     try:
-        message_id = feishu_client.send_card(chat_id, selection_card, receive_id_type="chat_id")
+        message_id = feishu_client.send_card(chat_id, confirmation_card, receive_id_type="chat_id")
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to send selection card: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to send confirmation card: {exc}") from exc
     repository.update(task_id, message_id=message_id)
-    return {"ok": True, "task_id": task_id, "waiting_expert_selection": True}
+    return {"ok": True, "task_id": task_id, "waiting_goal_confirmation": True}
 
 
 @router.post("/card/callback")
@@ -407,7 +438,34 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
         return {"toast": {"type": "error", "content": "任务不存在或已过期"}}
 
     op = action.get("action")
+    if op == "confirm_goal":
+        repository.update(task_id, waiting_goal_confirmation=False, waiting_expert_selection=True)
+        if record.message_id:
+            feishu_client.patch_message_card(record.message_id, build_expert_selection_card(task_id, record.selected_expert_keys or []))
+        return {"toast": {"type": "success", "content": "好的，先选专家，再开始讨论。"}}
+
+    if op == "reject_goal":
+        repository.update(task_id, waiting_goal_confirmation=False, cancelled=True, status="cancelled")
+        if record.message_id:
+            feishu_client.patch_message_card(
+                record.message_id,
+                {
+                    "config": {"update_multi": True},
+                    "header": {
+                        "title": {"tag": "plain_text", "content": "已取消本次任务"},
+                        "subtitle": {"tag": "plain_text", "content": f"任务编号：{task_id[:8]}"},
+                        "template": "grey",
+                    },
+                    "elements": [
+                        {"tag": "markdown", "content": "没问题，请重新发送你真正想讨论的问题，我会先让你确认后再开始。"}
+                    ],
+                },
+            )
+        return {"toast": {"type": "info", "content": "已取消，你可以重新输入问题。"}}
+
     if op == "confirm_experts":
+        if record.waiting_goal_confirmation:
+            return {"toast": {"type": "warning", "content": "请先确认讨论议题，再选择专家。"}}
         form_value = body.get("event", {}).get("action", {}).get("form_value", {})
         selected_raw = form_value.get("expert_keys", [])
         if isinstance(selected_raw, str):
