@@ -54,9 +54,9 @@ def expert_catalog() -> dict[str, ExpertProfile]:
         "expert_14": ExpertProfile("高奕", "社会学研究者（研究机构）", "社会影响、行为变迁", "研究技术变革对群体行为影响。", "关注长期社会外部性"),
         "expert_15": ExpertProfile("罗旻", "宏观经济分析师（研究院）", "宏观周期、产业经济", "擅长从宏观视角评估政策效果。", "强调系统性影响与传导路径"),
         "expert_16": ExpertProfile("唐屿", "技术伦理顾问（伦理委员会）", "伦理治理、价值冲突", "参与多项AI伦理治理项目。", "先审视不可逆风险"),
-        "easter_doraemon": ExpertProfile("哆啦A梦", "未来问题解决顾问（彩蛋角色）", "创意道具、逆向思维、儿童教育视角", "来自未来，擅长用想象力拆解复杂问题。", "先找更聪明的解法，再看现实约束"),
-        "easter_shinchan": ExpertProfile("蜡笔小新", "反常识体验官（彩蛋角色）", "用户直觉、场景吐槽、行为观察", "以孩童视角戳穿伪需求和复杂术语。", "先问好不好玩、好不好懂、好不好用"),
-        "easter_konan": ExpertProfile("江户川柯南", "逻辑推理顾问（彩蛋角色）", "证据链、因果推断、风险排查", "习惯从细节里找关键矛盾。", "先锁定事实，再还原真相"),
+        "easter_doraemon": ExpertProfile("哆啦A梦🐱", "22世纪的机器猫（彩蛋角色）", "创意道具、逆向思维、儿童教育视角", "来自22世纪，擅长用未来道具和想象力拆解复杂问题。", "先找更聪明的解法，再看现实约束"),
+        "easter_shinchan": ExpertProfile("蜡笔小新🖍️", "春日部向日葵B班核心成员（彩蛋角色）", "用户直觉、场景吐槽、行为观察", "以孩童视角戳穿伪需求和复杂术语，经常一针见血。", "先问好不好玩、好不好懂、好不好用"),
+        "easter_konan": ExpertProfile("江户川柯南🕵️", "平成时代的福尔摩斯（彩蛋角色）", "证据链、因果推断、风险排查", "擅长从细节中找关键矛盾并还原完整事实链。", "先锁定事实，再还原真相"),
     }
     return experts
 
@@ -201,6 +201,7 @@ def run_expert_panel(
         return target, point
 
     def round_speech(round_no: int, expert: ExpertProfile, context: str) -> str:
+        is_easter = "彩蛋角色" in expert.title
         if round_no == 1:
             instruction = (
                 "请以第一人称输出150-300字发言，并追加：\n"
@@ -223,10 +224,16 @@ def run_expert_panel(
                 "我的综合判断：<你的结论>\n"
                 "总字数150-260字。"
             )
+        style_hint = (
+            "你是彩蛋角色，请使用更可爱、更有梗的语气，适度多用表情符号（例如😊✨🎉🤔），"
+            "但仍要给出有用、可执行的观点，避免只卖萌。"
+            if is_easter
+            else "保持专业且清晰，尽量直达结论。"
+        )
         return _chat(
             f"你是{expert.name}，职位：{expert.title}；专长：{expert.expertise}；"
             f"背景：{expert.background}；思维倾向：{expert.mindset}",
-            f"讨论主题：{query}\n\n上下文：\n{context}\n\n{instruction}",
+            f"讨论主题：{query}\n\n上下文：\n{context}\n\n表达风格要求：{style_hint}\n\n{instruction}",
             model_specialist,
             max_tokens=700,
         )

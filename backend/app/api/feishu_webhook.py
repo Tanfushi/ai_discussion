@@ -62,7 +62,7 @@ def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
     options = []
     for key, expert in list(catalog.items()):
         is_easter = key.startswith("easter_")
-        role_type = "彩蛋角色" if is_easter else "专家角色"
+        role_type = "彩蛋角色🎊" if is_easter else "专家角色"
         options.append(
             {
                 "text": {"tag": "plain_text", "content": f"[{role_type}] {expert.name}｜{expert.title}"},
@@ -83,20 +83,18 @@ def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
                 "content": (
                     "请先在下拉框中一次性勾选专家（3-5位），再点击“开始讨论”。\n"
                     "只有点击提交按钮时才会上传你的选择。\n"
-                    "你也可以勾选彩蛋角色（如哆啦A梦、蜡笔小新）参与讨论。"
+                    "你也可以勾选彩蛋角色（如哆啦A梦🐱、蜡笔小新🖍️）参与讨论，会更可爱更有梗。"
                 ),
+            },
+            {
+                "tag": "checkbox",
+                "name": "expert_keys",
+                "options": options,
+                "value": selected_keys,
             },
             {
                 "tag": "action",
                 "actions": [
-                    {
-                        "tag": "select_static",
-                        "name": "expert_keys",
-                        "placeholder": {"tag": "plain_text", "content": "请选择参与讨论的专家（可多选）"},
-                        "multiple": True,
-                        "options": options,
-                        "value": selected_keys,
-                    },
                     {
                         "tag": "button",
                         "text": {"tag": "plain_text", "content": "开始讨论（一次性提交）"},
@@ -476,7 +474,15 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
         if isinstance(selected_raw, str):
             selected = [selected_raw]
         elif isinstance(selected_raw, list):
-            selected = selected_raw
+            # 兼容不同卡片组件返回：["expert_1"] 或 [{"value":"expert_1"}]
+            selected = []
+            for item in selected_raw:
+                if isinstance(item, str):
+                    selected.append(item)
+                elif isinstance(item, dict):
+                    value = item.get("value")
+                    if isinstance(value, str):
+                        selected.append(value)
         else:
             selected = []
         repository.update(task_id, selected_expert_keys=selected)
@@ -521,12 +527,33 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
                     for r in rounds[:2]
                 ]
             )
-        return {"toast": {"type": "info", "content": summary[:300] or "暂无讨论细节"}}
+        # 讨论结束后，细节以“新卡片”展示，保留结果卡不被覆盖。
+        detail_card = {
+            "config": {"update_multi": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "讨论细节摘要"},
+                "subtitle": {"tag": "plain_text", "content": f"任务编号：{task_id[:8]}"},
+                "template": "purple",
+            },
+            "elements": [
+                {"tag": "markdown", "content": summary[:2600] or "暂无讨论细节"},
+            ],
+        }
+        try:
+            feishu_client.send_card(record.chat_id, detail_card, receive_id_type="chat_id")
+            return {"toast": {"type": "success", "content": "已发送讨论细节卡片。"}}
+        except Exception as exc:
+            return {"toast": {"type": "error", "content": f"发送讨论细节卡失败：{str(exc)[:120]}"}}
 
     if op == "show_full_report":
         if record.message_id and record.result:
-            feishu_client.patch_message_card(record.message_id, build_full_report_card(task_id, record.result))
-            return {"toast": {"type": "success", "content": "已切换到完整讨论记录"}}
+            # 讨论完成后，完整讨论以新卡片发送，避免覆盖结果主卡。
+            try:
+                full_card = build_full_report_card(task_id, record.result)
+                feishu_client.send_card(record.chat_id, full_card, receive_id_type="chat_id")
+                return {"toast": {"type": "success", "content": "已发送完整讨论卡片。"}}
+            except Exception as exc:
+                return {"toast": {"type": "error", "content": f"发送完整讨论卡失败：{str(exc)[:120]}"}}
         if record.message_id:
             feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, record))
         return {"toast": {"type": "info", "content": "任务尚未完成，先展示实时讨论内容。"}}
