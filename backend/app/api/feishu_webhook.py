@@ -440,9 +440,14 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
     op = action.get("action")
     if op == "confirm_goal":
         repository.update(task_id, waiting_goal_confirmation=False, waiting_expert_selection=True)
-        if record.message_id:
-            feishu_client.patch_message_card(record.message_id, build_expert_selection_card(task_id, record.selected_expert_keys or []))
-        return {"toast": {"type": "success", "content": "好的，先选专家，再开始讨论。"}}
+        selection_card = build_expert_selection_card(task_id, record.selected_expert_keys or [])
+        try:
+            # 用“新发一张卡”替代 patch，规避不同客户端对旧卡更新的兼容问题。
+            new_message_id = feishu_client.send_card(record.chat_id, selection_card, receive_id_type="chat_id")
+            repository.update(task_id, message_id=new_message_id)
+            return {"toast": {"type": "success", "content": "已进入专家选择，请在新卡片中勾选专家。"}}
+        except Exception as exc:
+            return {"toast": {"type": "error", "content": f"进入专家选择失败：{str(exc)[:120]}"}}
 
     if op == "reject_goal":
         repository.update(task_id, waiting_goal_confirmation=False, cancelled=True, status="cancelled")
