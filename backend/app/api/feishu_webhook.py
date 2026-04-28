@@ -29,6 +29,7 @@ def _stage_cn(stage: str) -> str:
         "final_report": "报告生成",
         "done": "已完成",
         "failed": "失败",
+        "cancelled": "已停止",
     }
     return mapping.get(stage, stage)
 
@@ -48,6 +49,8 @@ def build_progress_card(task_id: str, stage: str, detail: str) -> dict:
                 "actions": [
                     {"tag": "button", "text": {"tag": "plain_text", "content": "重新裁决"}, "type": "default", "value": {"action": "rerun_judge", "task_id": task_id}},
                     {"tag": "button", "text": {"tag": "plain_text", "content": "查看讨论细节"}, "type": "default", "value": {"action": "show_debate", "task_id": task_id}},
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "查看完整讨论"}, "type": "default", "value": {"action": "show_full_report", "task_id": task_id}},
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "停止讨论"}, "type": "danger", "value": {"action": "stop_task", "task_id": task_id}},
                 ],
             },
         ],
@@ -56,10 +59,16 @@ def build_progress_card(task_id: str, stage: str, detail: str) -> dict:
 
 def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
     catalog = expert_catalog()
-    options_md = []
-    for key, expert in list(catalog.items())[:8]:
-        checked = "☑️" if key in selected_keys else "⬜"
-        options_md.append(f"{checked} **{expert.name}**｜{expert.title}")
+    options = []
+    for key, expert in list(catalog.items()):
+        is_easter = key.startswith("easter_")
+        role_type = "彩蛋角色" if is_easter else "专家角色"
+        options.append(
+            {
+                "text": {"tag": "plain_text", "content": f"[{role_type}] {expert.name}｜{expert.title}"},
+                "value": key,
+            }
+        )
     picked = len(selected_keys)
     return {
         "config": {"update_multi": True},
@@ -72,68 +81,18 @@ def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
             {
                 "tag": "markdown",
                 "content": (
-                    "请先连续点选专家，系统会先暂存你的选择。\n"
-                    "当你点“开始讨论”时，才会一次性提交并启动讨论。\n\n"
-                    + "\n".join(options_md)
+                    "请先在下拉框中一次性勾选专家（3-5位），再点击“开始讨论”。\n"
+                    "只有点击提交按钮时才会上传你的选择。\n"
+                    "你也可以勾选彩蛋角色（如哆啦A梦、蜡笔小新）参与讨论。"
                 ),
             },
             {
-                "tag": "action",
-                "actions": [
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "切换：架构师 沈川"},
-                        "type": "default",
-                        "value": {"action": "toggle_expert", "task_id": task_id, "expert_key": "expert_1"},
-                    },
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "切换：安全 顾淮"},
-                        "type": "default",
-                        "value": {"action": "toggle_expert", "task_id": task_id, "expert_key": "expert_2"},
-                    },
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "切换：工程 韩默"},
-                        "type": "default",
-                        "value": {"action": "toggle_expert", "task_id": task_id, "expert_key": "expert_3"},
-                    },
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "切换：SRE 苏砚"},
-                        "type": "default",
-                        "value": {"action": "toggle_expert", "task_id": task_id, "expert_key": "expert_4"},
-                    },
-                ],
-            },
-            {
-                "tag": "action",
-                "actions": [
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "切换：战略 林泽"},
-                        "type": "default",
-                        "value": {"action": "toggle_expert", "task_id": task_id, "expert_key": "expert_5"},
-                    },
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "切换：运营 周岚"},
-                        "type": "default",
-                        "value": {"action": "toggle_expert", "task_id": task_id, "expert_key": "expert_6"},
-                    },
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "切换：投资 赵衡"},
-                        "type": "default",
-                        "value": {"action": "toggle_expert", "task_id": task_id, "expert_key": "expert_7"},
-                    },
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "切换：财务 许安"},
-                        "type": "default",
-                        "value": {"action": "toggle_expert", "task_id": task_id, "expert_key": "expert_8"},
-                    },
-                ],
+                "tag": "select_static",
+                "name": "expert_keys",
+                "placeholder": {"tag": "plain_text", "content": "请选择参与讨论的专家（可多选）"},
+                "multiple": True,
+                "options": options,
+                "value": selected_keys,
             },
             {
                 "tag": "action",
@@ -288,6 +247,35 @@ def build_full_report_card(task_id: str, result: dict) -> dict:
     }
 
 
+def build_live_discussion_card(task_id: str, record) -> dict:
+    transcript = record.live_transcript or []
+    stage_logs = record.stage_logs or []
+    recent_text = "\n".join([f"- {line}" for line in transcript[-15:]]) or "暂无实时发言内容"
+    recent_stage = "\n".join([f"- {line}" for line in stage_logs[-6:]]) or "暂无阶段日志"
+    status_text = "已停止" if record.cancelled else ("进行中" if record.status == "running" else record.status)
+    return {
+        "config": {"update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "讨论实时查看"},
+            "subtitle": {"tag": "plain_text", "content": f"任务编号：{task_id[:8]}｜状态：{status_text}"},
+            "template": "orange",
+        },
+        "elements": [
+            {"tag": "markdown", "content": f"**阶段进度**\n{recent_stage[:1200]}"},
+            {"tag": "markdown", "content": f"**实时讨论内容（最近）**\n{recent_text[:2800]}"},
+            {
+                "tag": "action",
+                "actions": [
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "刷新实时内容"}, "type": "default", "value": {"action": "show_debate", "task_id": task_id}},
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "查看完整讨论"}, "type": "default", "value": {"action": "show_full_report", "task_id": task_id}},
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "停止讨论"}, "type": "danger", "value": {"action": "stop_task", "task_id": task_id}},
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "返回结果摘要"}, "type": "primary", "value": {"action": "back_to_summary", "task_id": task_id}},
+                ],
+            },
+        ],
+    }
+
+
 def regenerate_judgement(query: str, result: dict) -> str:
     settings = get_settings()
     if result.get("mode") == "expert_panel":
@@ -339,6 +327,16 @@ def _process_task(task_id: str) -> None:
         if record.message_id:
             feishu_client.patch_message_card(record.message_id, build_result_card(task_id, result))
     except Exception as exc:
+        latest = repository.get(task_id)
+        if latest and latest.cancelled:
+            repository.update(task_id, status="cancelled", error="任务已被用户停止")
+            if record.message_id:
+                feishu_client.patch_message_card(
+                    record.message_id,
+                    build_progress_card(task_id, "failed", "任务已停止，你可以重新发起新任务。"),
+                )
+            return
+
         repository.update(task_id, status="failed", error=str(exc))
         if record.message_id:
             feishu_client.patch_message_card(
@@ -409,19 +407,16 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
         return {"toast": {"type": "error", "content": "任务不存在或已过期"}}
 
     op = action.get("action")
-    if op == "toggle_expert":
-        expert_key = action.get("expert_key", "")
-        selected = list(record.selected_expert_keys or [])
-        if expert_key in selected:
-            selected = [k for k in selected if k != expert_key]
-        else:
-            selected.append(expert_key)
-        repository.update(task_id, selected_expert_keys=selected)
-        # 点选阶段只做暂存，不刷新整卡，避免“每点一次就传送一次”的感受。
-        return {"toast": {"type": "info", "content": f"已暂存，当前选择 {len(selected)} 位。"}}
-
     if op == "confirm_experts":
-        selected = list(record.selected_expert_keys or [])
+        form_value = body.get("event", {}).get("action", {}).get("form_value", {})
+        selected_raw = form_value.get("expert_keys", [])
+        if isinstance(selected_raw, str):
+            selected = [selected_raw]
+        elif isinstance(selected_raw, list):
+            selected = selected_raw
+        else:
+            selected = []
+        repository.update(task_id, selected_expert_keys=selected)
         if len(selected) < 3:
             return {"toast": {"type": "warning", "content": "请至少选择3位专家再开始讨论。"}}
         if len(selected) > 5:
@@ -437,14 +432,9 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
 
     if op == "show_debate":
         if record.status != "completed" and not record.result:
-            logs = record.stage_logs or []
-            latest_logs = "\n".join([f"- {line}" for line in logs[-8:]])
-            return {
-                "toast": {
-                    "type": "info",
-                    "content": (latest_logs[:300] if latest_logs else "任务正在进行中，暂时没有可展示的讨论文本。"),
-                }
-            }
+            if record.message_id:
+                feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, record))
+            return {"toast": {"type": "success", "content": "已切换到实时讨论视图。"}}
 
         rounds = (record.result or {}).get("rounds", [])
         if rounds and isinstance(rounds[0], dict) and "speeches" in rounds[0]:
@@ -473,12 +463,33 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
     if op == "show_full_report":
         if record.message_id and record.result:
             feishu_client.patch_message_card(record.message_id, build_full_report_card(task_id, record.result))
-        return {"toast": {"type": "success", "content": "已切换到完整讨论记录"}}
+            return {"toast": {"type": "success", "content": "已切换到完整讨论记录"}}
+        if record.message_id:
+            feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, record))
+        return {"toast": {"type": "info", "content": "任务尚未完成，先展示实时讨论内容。"}}
 
     if op == "back_to_summary":
         if record.message_id and record.result:
             feishu_client.patch_message_card(record.message_id, build_result_card(task_id, record.result))
-        return {"toast": {"type": "success", "content": "已返回结果摘要"}}
+            return {"toast": {"type": "success", "content": "已返回结果摘要"}}
+        if record.message_id:
+            latest = repository.get(task_id) or record
+            feishu_client.patch_message_card(
+                record.message_id,
+                build_progress_card(task_id, "discussion", f"任务进行中，已记录 {len(latest.live_transcript or [])} 条实时讨论内容。"),
+            )
+        return {"toast": {"type": "info", "content": "任务尚未完成，已返回进度卡片。"}}
+
+    if op == "stop_task":
+        if record.status in {"completed", "failed", "cancelled"}:
+            return {"toast": {"type": "warning", "content": "当前任务已结束，无需停止。"}}
+        repository.update(task_id, cancelled=True)
+        if record.message_id:
+            feishu_client.patch_message_card(
+                record.message_id,
+                build_progress_card(task_id, "failed", "已收到停止指令，正在终止讨论流程。"),
+            )
+        return {"toast": {"type": "success", "content": "已发送停止指令，讨论将尽快终止。"}}
 
     if op == "rerun_judge":
         if record.status != "completed" or not record.result:

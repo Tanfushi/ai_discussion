@@ -18,6 +18,8 @@ class TaskRecord:
     stage_logs: list[str] = field(default_factory=list)
     selected_expert_keys: list[str] = field(default_factory=list)
     waiting_expert_selection: bool = False
+    cancelled: bool = False
+    live_transcript: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 

@@ -10,6 +10,8 @@ from app.integrations.openai_client import openai_client
 
 
 StageCallback = Callable[[str, str], None]
+TranscriptCallback = Callable[[str], None]
+StopCallback = Callable[[], bool]
 
 TRIGGER_KEYWORDS = [
     "深度分析",
@@ -35,25 +37,28 @@ class ExpertProfile:
 
 
 def expert_catalog() -> dict[str, ExpertProfile]:
-    all_experts = [
-        ExpertProfile("沈川", "首席架构师（互联网公司）", "系统架构、性能、可扩展性", "主导过大规模高并发系统重构。", "优先关注复杂度与长期演进"),
-        ExpertProfile("顾淮", "安全与合规负责人（安全团队）", "应用安全、数据合规、审计", "长期负责企业级安全体系建设。", "先保底线，再谈效率"),
-        ExpertProfile("韩默", "工程效能负责人（研发组织）", "交付流程、工程管理、质量", "擅长从工程流程角度提升交付成功率。", "强调迭代速度与稳定平衡"),
-        ExpertProfile("苏砚", "SRE负责人（平台团队）", "可观测性、容灾、运维治理", "长期维护核心生产系统稳定性。", "优先评估故障模式与运维成本"),
-        ExpertProfile("林泽", "战略咨询合伙人（咨询机构）", "战略、竞争、组织执行", "长期服务平台与企业服务客户，擅长战略落地。", "自上而下，先判断长期壁垒"),
-        ExpertProfile("周岚", "行业运营负责人（头部平台）", "业务运营、渠道、商业化", "20年行业经验，关注一线执行约束。", "强调可落地和短中期收益"),
-        ExpertProfile("赵衡", "风险投资合伙人（VC）", "商业模式、增长效率、资本约束", "聚焦成长型公司的资源配置效率。", "偏好高杠杆增长与可验证路径"),
-        ExpertProfile("许安", "财务与风控专家（企业财务）", "预算、ROI、风险控制", "负责过多项数字化转型项目的财务评审。", "重视现金流、安全边界与合规"),
-        ExpertProfile("程霁", "产品战略总监（互联网产品）", "产品定位、增长策略", "多次主导从0到1产品孵化。", "强调市场窗口和差异化"),
-        ExpertProfile("莫青", "用户研究负责人（体验团队）", "用户洞察、行为研究", "长期研究用户决策路径。", "从用户动机反推方案优先级"),
-        ExpertProfile("袁潇", "交互设计专家（设计团队）", "信息架构、关键路径体验", "聚焦复杂产品的体验简化。", "关注认知负荷与转化路径"),
-        ExpertProfile("魏临", "数据分析负责人（数据团队）", "指标体系、实验设计、归因", "负责增长实验和策略评估。", "以数据证据校验假设"),
-        ExpertProfile("陈汀", "政策研究员（智库）", "政策解读、监管趋势", "长期跟踪产业政策与监管演进。", "优先看政策边界与可预期性"),
-        ExpertProfile("高奕", "社会学研究者（研究机构）", "社会影响、行为变迁", "研究技术变革对群体行为影响。", "关注长期社会外部性"),
-        ExpertProfile("罗旻", "宏观经济分析师（研究院）", "宏观周期、产业经济", "擅长从宏观视角评估政策效果。", "强调系统性影响与传导路径"),
-        ExpertProfile("唐屿", "技术伦理顾问（伦理委员会）", "伦理治理、价值冲突", "参与多项AI伦理治理项目。", "先审视不可逆风险"),
-    ]
-    return {f"expert_{idx+1}": e for idx, e in enumerate(all_experts)}
+    experts = {
+        "expert_1": ExpertProfile("沈川", "首席架构师（互联网公司）", "系统架构、性能、可扩展性", "主导过大规模高并发系统重构。", "优先关注复杂度与长期演进"),
+        "expert_2": ExpertProfile("顾淮", "安全与合规负责人（安全团队）", "应用安全、数据合规、审计", "长期负责企业级安全体系建设。", "先保底线，再谈效率"),
+        "expert_3": ExpertProfile("韩默", "工程效能负责人（研发组织）", "交付流程、工程管理、质量", "擅长从工程流程角度提升交付成功率。", "强调迭代速度与稳定平衡"),
+        "expert_4": ExpertProfile("苏砚", "SRE负责人（平台团队）", "可观测性、容灾、运维治理", "长期维护核心生产系统稳定性。", "优先评估故障模式与运维成本"),
+        "expert_5": ExpertProfile("林泽", "战略咨询合伙人（咨询机构）", "战略、竞争、组织执行", "长期服务平台与企业服务客户，擅长战略落地。", "自上而下，先判断长期壁垒"),
+        "expert_6": ExpertProfile("周岚", "行业运营负责人（头部平台）", "业务运营、渠道、商业化", "20年行业经验，关注一线执行约束。", "强调可落地和短中期收益"),
+        "expert_7": ExpertProfile("赵衡", "风险投资合伙人（VC）", "商业模式、增长效率、资本约束", "聚焦成长型公司的资源配置效率。", "偏好高杠杆增长与可验证路径"),
+        "expert_8": ExpertProfile("许安", "财务与风控专家（企业财务）", "预算、ROI、风险控制", "负责过多项数字化转型项目的财务评审。", "重视现金流、安全边界与合规"),
+        "expert_9": ExpertProfile("程霁", "产品战略总监（互联网产品）", "产品定位、增长策略", "多次主导从0到1产品孵化。", "强调市场窗口和差异化"),
+        "expert_10": ExpertProfile("莫青", "用户研究负责人（体验团队）", "用户洞察、行为研究", "长期研究用户决策路径。", "从用户动机反推方案优先级"),
+        "expert_11": ExpertProfile("袁潇", "交互设计专家（设计团队）", "信息架构、关键路径体验", "聚焦复杂产品的体验简化。", "关注认知负荷与转化路径"),
+        "expert_12": ExpertProfile("魏临", "数据分析负责人（数据团队）", "指标体系、实验设计、归因", "负责增长实验和策略评估。", "以数据证据校验假设"),
+        "expert_13": ExpertProfile("陈汀", "政策研究员（智库）", "政策解读、监管趋势", "长期跟踪产业政策与监管演进。", "优先看政策边界与可预期性"),
+        "expert_14": ExpertProfile("高奕", "社会学研究者（研究机构）", "社会影响、行为变迁", "研究技术变革对群体行为影响。", "关注长期社会外部性"),
+        "expert_15": ExpertProfile("罗旻", "宏观经济分析师（研究院）", "宏观周期、产业经济", "擅长从宏观视角评估政策效果。", "强调系统性影响与传导路径"),
+        "expert_16": ExpertProfile("唐屿", "技术伦理顾问（伦理委员会）", "伦理治理、价值冲突", "参与多项AI伦理治理项目。", "先审视不可逆风险"),
+        "easter_doraemon": ExpertProfile("哆啦A梦", "未来问题解决顾问（彩蛋角色）", "创意道具、逆向思维、儿童教育视角", "来自未来，擅长用想象力拆解复杂问题。", "先找更聪明的解法，再看现实约束"),
+        "easter_shinchan": ExpertProfile("蜡笔小新", "反常识体验官（彩蛋角色）", "用户直觉、场景吐槽、行为观察", "以孩童视角戳穿伪需求和复杂术语。", "先问好不好玩、好不好懂、好不好用"),
+        "easter_konan": ExpertProfile("江户川柯南", "逻辑推理顾问（彩蛋角色）", "证据链、因果推断、风险排查", "习惯从细节里找关键矛盾。", "先锁定事实，再还原真相"),
+    }
+    return experts
 
 
 def experts_by_keys(keys: list[str]) -> list[ExpertProfile]:
@@ -154,6 +159,8 @@ def run_expert_panel(
     query: str,
     on_stage: StageCallback | None = None,
     selected_expert_keys: list[str] | None = None,
+    on_transcript: TranscriptCallback | None = None,
+    should_stop: StopCallback | None = None,
 ) -> dict:
     settings = get_settings()
     model_planner = settings.openai_model_planner
@@ -162,6 +169,9 @@ def run_expert_panel(
 
     if on_stage:
         on_stage("goal_understanding", "正在解析你的目标与分析范围。")
+    if should_stop and should_stop():
+        raise RuntimeError("任务已被用户停止")
+
     objective = _chat(
         "你是分析任务澄清助手。",
         f"请提炼用户目标，输出：核心问题/分析深度/关键视角/期望输出。\n\n用户输入:\n{query}",
@@ -174,6 +184,8 @@ def run_expert_panel(
     experts = experts_by_keys(selected_expert_keys or [])
     if len(experts) < 3:
         experts = _build_expert_panel(query, model_planner)
+    if on_transcript:
+        on_transcript("【系统】已确认专家阵容：" + "、".join([e.name for e in experts]))
 
     interaction_timeline: list[dict[str, str]] = []
 
@@ -226,7 +238,12 @@ def run_expert_panel(
         on_stage("round_1", "第一回合：专家初步立场与核心判断。")
     speeches_1 = []
     for expert in experts:
-        speeches_1.append({"expert": expert.name, "content": round_speech(1, expert, round_context)})
+        if should_stop and should_stop():
+            raise RuntimeError("任务已被用户停止")
+        content = round_speech(1, expert, round_context)
+        speeches_1.append({"expert": expert.name, "content": content})
+        if on_transcript:
+            on_transcript(f"【第1轮】{expert.name}：{content[:220]}")
     rounds.append({"round": "1", "theme": "初步立场与核心判断", "speeches": speeches_1})
 
     if on_stage:
@@ -234,6 +251,8 @@ def run_expert_panel(
     round_context_2 = round_context + "\n\n".join([f"{s['expert']}:\n{s['content']}" for s in speeches_1])
     speeches_2 = []
     for expert in experts:
+        if should_stop and should_stop():
+            raise RuntimeError("任务已被用户停止")
         content = round_speech(2, expert, round_context_2)
         speeches_2.append({"expert": expert.name, "content": content})
         target, point = _extract_reference(content)
@@ -245,6 +264,8 @@ def run_expert_panel(
                 "point": point,
             }
         )
+        if on_transcript:
+            on_transcript(f"【第2轮】{expert.name}回应{target}：{content[:220]}")
     rounds.append({"round": "2", "theme": "交叉质询与深度碰撞", "speeches": speeches_2})
 
     if on_stage:
@@ -252,6 +273,8 @@ def run_expert_panel(
     round_context_3 = round_context_2 + "\n\n".join([f"{s['expert']}:\n{s['content']}" for s in speeches_2])
     speeches_3 = []
     for expert in experts:
+        if should_stop and should_stop():
+            raise RuntimeError("任务已被用户停止")
         content = round_speech(3, expert, round_context_3)
         speeches_3.append({"expert": expert.name, "content": content})
         target, point = _extract_reference(content)
@@ -263,6 +286,8 @@ def run_expert_panel(
                 "point": point,
             }
         )
+        if on_transcript:
+            on_transcript(f"【第3轮】{expert.name}综合判断：{content[:220]}")
     rounds.append({"round": "3", "theme": "综合与建议", "speeches": speeches_3})
 
     if on_stage:
@@ -279,6 +304,8 @@ def run_expert_panel(
         model_judge,
         max_tokens=1400,
     )
+    if on_transcript:
+        on_transcript("【系统】已生成关键分歧与深度聚焦摘要。")
 
     if on_stage:
         on_stage("final_report", "生成专家组综合分析报告。")
@@ -302,6 +329,8 @@ def run_expert_panel(
         model_judge,
         max_tokens=1800,
     )
+    if on_transcript:
+        on_transcript("【系统】最终综合报告已生成。")
 
     return {
         "mode": "expert_panel",

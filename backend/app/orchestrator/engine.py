@@ -18,6 +18,9 @@ class OrchestratorEngine:
         record = repository.get(task_id)
         if not record:
             raise ValueError(f"Task not found: {task_id}")
+        if record.cancelled:
+            repository.update(task_id, status="cancelled", error="任务已被用户取消")
+            raise RuntimeError("任务已被用户取消")
 
         repository.update(task_id, status="running")
         use_expert_panel = should_use_expert_panel(record.query)
@@ -29,11 +32,25 @@ class OrchestratorEngine:
 
         with ThreadPoolExecutor(max_workers=1) as pool:
             if use_expert_panel:
+                def on_transcript(line: str) -> None:
+                    latest = repository.get(task_id)
+                    if not latest:
+                        return
+                    transcript = list(latest.live_transcript or [])
+                    transcript.append(line)
+                    repository.update(task_id, live_transcript=transcript[-80:])
+
+                def should_stop() -> bool:
+                    latest = repository.get(task_id)
+                    return bool(latest and latest.cancelled)
+
                 future = pool.submit(
                     run_expert_panel,
                     record.query,
                     on_stage,
                     record.selected_expert_keys,
+                    on_transcript,
+                    should_stop,
                 )
             else:
                 future = pool.submit(run_debate, record.query)
@@ -50,6 +67,10 @@ class OrchestratorEngine:
                 )
                 raise TimeoutError("Orchestration timeout") from exc
             except Exception as exc:
+                latest = repository.get(task_id)
+                if latest and latest.cancelled:
+                    repository.update(task_id, status="cancelled", error="任务已被用户停止")
+                    raise RuntimeError("任务已被用户停止") from exc
                 retries = (record.retries or 0) + 1
                 repository.update(task_id, status="failed", retries=retries, error=str(exc))
                 raise

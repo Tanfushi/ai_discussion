@@ -20,7 +20,13 @@ def test_execute_task_expert_panel_mode(monkeypatch):
     task_id = "task-expert-panel"
     repository.create_or_get(task_id, "chat-2", "请做多角度深度分析与专家讨论", "msg-expert-panel")
 
-    def fake_run_expert(query: str, on_stage=None, selected_expert_keys=None):
+    def fake_run_expert(
+        query: str,
+        on_stage=None,
+        selected_expert_keys=None,
+        on_transcript=None,
+        should_stop=None,
+    ):
         if on_stage:
             on_stage("round_1", "ok")
         return {"mode": "expert_panel", "final_report": f"report:{query}", "rounds": []}
