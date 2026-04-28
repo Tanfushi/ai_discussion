@@ -87,14 +87,16 @@ def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
                 ),
             },
             {
-                "tag": "checkbox",
-                "name": "expert_keys",
-                "options": options,
-                "value": selected_keys,
-            },
-            {
                 "tag": "action",
                 "actions": [
+                    {
+                        "tag": "select_static",
+                        "name": "expert_keys",
+                        "placeholder": {"tag": "plain_text", "content": "请选择参与讨论的专家（可多选）"},
+                        "multiple": True,
+                        "options": options,
+                        "value": selected_keys,
+                    },
                     {
                         "tag": "button",
                         "text": {"tag": "plain_text", "content": "开始讨论（一次性提交）"},
