@@ -55,6 +55,24 @@ def _stage_badge(stage: str) -> str:
     return mapping.get(stage, "🧠 处理中")
 
 
+def _human_stage_line(stage: str) -> str:
+    lines = {
+        "queued": "我已经收到你的消息啦，正在准备开始讨论。",
+        "goal_understanding": "我在先理解你的真实诉求，避免答偏。",
+        "panel_setup": "我在组织合适的角色阵容，让讨论更有价值。",
+        "panel_mode": "我已切换到多角色深度讨论模式，马上进入辩论。",
+        "round_1": "第一轮开始：大家先给出各自立场和核心判断。",
+        "round_2": "第二轮开始：他们正在互相质询和反驳关键观点。",
+        "round_3": "第三轮开始：他们在收敛分歧并给出行动建议。",
+        "deep_focus": "我在把关键争议点展开，避免只讲空话。",
+        "final_report": "我在整理最后报告，马上给你结论。",
+        "done": "讨论完成，我已经把结果整理好了。",
+        "failed": "这次执行遇到问题了，我在给你保留现场信息。",
+        "cancelled": "好的，我已按你的要求停止这次讨论。",
+    }
+    return lines.get(stage, "我在处理中，稍等我一下。")
+
+
 def build_progress_card(task_id: str, stage: str, detail: str) -> dict:
     return {
         "config": {"update_multi": True},
@@ -64,7 +82,14 @@ def build_progress_card(task_id: str, stage: str, detail: str) -> dict:
             "template": "indigo",
         },
         "elements": [
-            {"tag": "markdown", "content": f"**状态回执**：{_stage_badge(stage)}\n\n**当前阶段**：`{_stage_cn(stage)}`\n\n{detail}"},
+            {
+                "tag": "markdown",
+                "content": (
+                    f"**状态回执**：{_stage_badge(stage)}\n\n"
+                    f"**我在做什么**：{_human_stage_line(stage)}\n\n"
+                    f"**当前阶段**：`{_stage_cn(stage)}`\n\n{detail}"
+                ),
+            },
             {
                 "tag": "action",
                 "actions": [
@@ -79,19 +104,13 @@ def build_progress_card(task_id: str, stage: str, detail: str) -> dict:
     }
 
 
-def build_expert_selection_card(task_id: str, selected_keys: list[str], page: int = 0) -> dict:
+def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
     catalog = expert_catalog()
     entries = list(catalog.items())
-    page_size = 9
-    total_pages = max(1, (len(entries) + page_size - 1) // page_size)
-    page = max(0, min(page, total_pages - 1))
-    start = page * page_size
-    end = start + page_size
-    page_entries = entries[start:end]
 
     selected_names = []
     toggle_actions = []
-    for key, expert in page_entries:
+    for key, expert in entries:
         is_easter = key.startswith("easter_")
         role_type = "彩蛋角色🎊" if is_easter else "专家角色"
         selected = key in selected_keys
@@ -130,28 +149,10 @@ def build_expert_selection_card(task_id: str, selected_keys: list[str], page: in
                 "content": (
                     "请点击下方按钮勾选/取消角色，建议选择 3-5 位。\n"
                     "你也可以勾选彩蛋角色（如哆啦A梦🐱、蜡笔小新🖍️）参与讨论，会更可爱更有梗。\n\n"
-                    f"**当前已选（{picked}）**：{selected_text}\n"
-                    f"**角色页码**：第 {page + 1}/{total_pages} 页"
+                    f"**当前已选（{picked}）**：{selected_text}"
                 ),
             },
             *action_rows,
-            {
-                "tag": "action",
-                "actions": [
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "上一页"},
-                        "type": "default",
-                        "value": {"action": "change_expert_page", "task_id": task_id, "page_delta": -1},
-                    },
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "下一页"},
-                        "type": "default",
-                        "value": {"action": "change_expert_page", "task_id": task_id, "page_delta": 1},
-                    },
-                ],
-            },
             {
                 "tag": "action",
                 "actions": [
@@ -176,7 +177,14 @@ def build_goal_confirmation_card(task_id: str, query: str) -> dict:
             "template": "blue",
         },
         "elements": [
-            {"tag": "markdown", "content": f"你刚才输入的是：\n\n**{query[:500]}**\n\n这是你想讨论的问题吗？"},
+            {
+                "tag": "markdown",
+                "content": (
+                    "✅ 我已经看到你的消息啦。\n\n"
+                    f"你刚才输入的是：\n\n**{query[:500]}**\n\n"
+                    "这是你想讨论的问题吗？确认后我再进入专家讨论。"
+                ),
+            },
             {
                 "tag": "action",
                 "actions": [
@@ -222,6 +230,7 @@ def build_result_card(task_id: str, result: dict) -> dict:
                 "template": "green",
             },
             "elements": [
+                {"tag": "markdown", "content": "🎯 **一句话总结**：我已经把讨论收敛成可执行建议，你可以先看综合报告，再按需展开细节。"},
                 {"tag": "markdown", "content": f"**目标澄清**\n{result.get('objective', '-')[:900]}"},
                 {"tag": "markdown", "content": f"**专家阵容（3-5位）**\n{experts_text[:1200]}"},
                 {"tag": "markdown", "content": f"**讨论互动时间线（谁回应了谁）**\n{timeline_text[:1200] or '-'}"},
@@ -256,6 +265,7 @@ def build_result_card(task_id: str, result: dict) -> dict:
             "template": "green",
         },
         "elements": [
+            {"tag": "markdown", "content": "🎯 **一句话总结**：我把多角色讨论内容收敛成了结论与下一步动作，先看最终裁决。"},
             {"tag": "markdown", "content": f"**任务拆解**\n{result.get('plan', '-')[:1200]}"},
             {
                 "tag": "markdown",
@@ -351,6 +361,7 @@ def build_live_discussion_card(task_id: str, record) -> dict:
             "template": "orange",
         },
         "elements": [
+            {"tag": "markdown", "content": "🧠 我会在这里持续同步讨论过程，你不用来回切页面。"},
             {"tag": "markdown", "content": f"**阶段进度**\n{recent_stage[:1200]}"},
             {"tag": "markdown", "content": f"**实时讨论内容（最近）**\n{recent_text[:2800]}"},
             {
@@ -535,25 +546,15 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
         if record.message_id:
             feishu_client.patch_message_card(
                 record.message_id,
-                build_expert_selection_card(task_id, selected, record.selection_page),
+                build_expert_selection_card(task_id, selected),
             )
         return {"toast": {"type": "info", "content": f"当前已选 {len(selected)} 位"}}
 
-    if op == "change_expert_page":
-        delta = int(action.get("page_delta", 0))
-        new_page = max(0, (record.selection_page or 0) + delta)
-        repository.update(task_id, selection_page=new_page)
-        latest = repository.get(task_id) or record
-        if record.message_id:
-            feishu_client.patch_message_card(
-                record.message_id,
-                build_expert_selection_card(task_id, latest.selected_expert_keys or [], latest.selection_page),
-            )
-        return {"toast": {"type": "info", "content": f"已切换到第 {new_page + 1} 页"}}
-
     if op == "confirm_goal":
+        if not record.waiting_goal_confirmation:
+            return {"toast": {"type": "info", "content": "你已经进入专家选择，请在最新卡片继续操作。"}}
         repository.update(task_id, waiting_goal_confirmation=False, waiting_expert_selection=True, selection_page=0)
-        selection_card = build_expert_selection_card(task_id, record.selected_expert_keys or [], 0)
+        selection_card = build_expert_selection_card(task_id, record.selected_expert_keys or [])
         try:
             # 按用户要求：不在原卡内跳转，统一新发卡片，避免闪回旧界面。
             new_message_id = feishu_client.send_card(record.chat_id, selection_card, receive_id_type="chat_id")
@@ -563,6 +564,8 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
             return {"toast": {"type": "error", "content": f"进入专家选择失败：{str(exc)[:120]}"}}
 
     if op == "reject_goal":
+        if not record.waiting_goal_confirmation:
+            return {"toast": {"type": "info", "content": "当前议题已确认，不需要重复操作。"}}
         repository.update(task_id, waiting_goal_confirmation=False, cancelled=True, status="cancelled")
         if record.message_id:
             feishu_client.patch_message_card(

@@ -39,15 +39,17 @@ class OrchestratorEngine:
 
         with ThreadPoolExecutor(max_workers=1) as pool:
             if use_expert_panel:
-                def on_transcript(line: str) -> None:
+                transcript_hook = on_transcript
+
+                def on_transcript_update(line: str) -> None:
                     latest = repository.get(task_id)
                     if not latest:
                         return
                     transcript = list(latest.live_transcript or [])
                     transcript.append(line)
                     repository.update(task_id, live_transcript=transcript[-80:])
-                    if on_transcript:
-                        on_transcript(line)
+                    if transcript_hook:
+                        transcript_hook(line)
 
                 def should_stop() -> bool:
                     latest = repository.get(task_id)
@@ -58,7 +60,7 @@ class OrchestratorEngine:
                     record.query,
                     on_stage,
                     record.selected_expert_keys,
-                    on_transcript,
+                    on_transcript_update,
                     should_stop,
                 )
             else:
