@@ -369,8 +369,34 @@ def build_live_discussion_card(task_id: str, record) -> dict:
                 "actions": [
                     {"tag": "button", "text": {"tag": "plain_text", "content": "刷新实时内容"}, "type": "default", "value": {"action": "show_debate", "task_id": task_id}},
                     {"tag": "button", "text": {"tag": "plain_text", "content": "查看完整讨论"}, "type": "default", "value": {"action": "show_full_report", "task_id": task_id}},
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "查看结果摘要"}, "type": "primary", "value": {"action": "show_result_summary", "task_id": task_id}},
                     {"tag": "button", "text": {"tag": "plain_text", "content": "停止讨论"}, "type": "danger", "value": {"action": "stop_task", "task_id": task_id}},
                     {"tag": "button", "text": {"tag": "plain_text", "content": "返回结果摘要"}, "type": "primary", "value": {"action": "back_to_summary", "task_id": task_id}},
+                ],
+            },
+        ],
+    }
+
+
+def build_followup_card(task_id: str) -> dict:
+    return {
+        "config": {"update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "讨论已结束"},
+            "subtitle": {"tag": "plain_text", "content": f"任务编号：{task_id[:8]}"},
+            "template": "turquoise",
+        },
+        "elements": [
+            {"tag": "markdown", "content": "✅ 当前讨论已经结束。\n\n还需要开始新的话题吗？请继续。"},
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "继续新话题"},
+                        "type": "primary",
+                        "value": {"action": "continue_topic", "task_id": task_id},
+                    }
                 ],
             },
         ],
@@ -447,6 +473,8 @@ def _process_task(task_id: str) -> None:
                     record.message_id,
                     build_progress_card(task_id, "done", "讨论已完成。点击“查看结果摘要”或“查看完整讨论”查看内容。"),
                 )
+            # 结束后补发一张“继续话题”引导卡，降低用户下一步决策成本。
+            feishu_client.send_card(record.chat_id, build_followup_card(task_id), receive_id_type="chat_id")
     except Exception as exc:
         latest = repository.get(task_id)
         if latest and latest.cancelled:
@@ -537,15 +565,17 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
     op = action.get("action")
     if op == "toggle_expert":
         expert_key = action.get("expert_key", "")
-        selected = list(record.selected_expert_keys or [])
+        latest = repository.get(task_id) or record
+        selected = list(latest.selected_expert_keys or [])
         if expert_key in selected:
             selected = [k for k in selected if k != expert_key]
         else:
             selected.append(expert_key)
         repository.update(task_id, selected_expert_keys=selected)
-        if record.message_id:
+        latest = repository.get(task_id) or latest
+        if latest.message_id:
             feishu_client.patch_message_card(
-                record.message_id,
+                latest.message_id,
                 build_expert_selection_card(task_id, selected),
             )
         return {"toast": {"type": "info", "content": f"当前已选 {len(selected)} 位"}}
@@ -553,13 +583,16 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
     if op == "confirm_goal":
         if not record.waiting_goal_confirmation:
             return {"toast": {"type": "info", "content": "你已经进入专家选择，请在最新卡片继续操作。"}}
-        repository.update(task_id, waiting_goal_confirmation=False, waiting_expert_selection=True, selection_page=0)
+        repository.update(task_id, waiting_goal_confirmation=False, waiting_expert_selection=True, selection_page=0, ui_view_mode="selection")
         selection_card = build_expert_selection_card(task_id, record.selected_expert_keys or [])
         try:
-            # 按用户要求：不在原卡内跳转，统一新发卡片，避免闪回旧界面。
+            latest = repository.get(task_id) or record
+            if latest.message_id:
+                feishu_client.patch_message_card(latest.message_id, selection_card)
+                return {"toast": {"type": "success", "content": "已进入专家选择，请继续勾选。"}}
             new_message_id = feishu_client.send_card(record.chat_id, selection_card, receive_id_type="chat_id")
-            repository.update(task_id, message_id=new_message_id, ui_view_mode="progress")
-            return {"toast": {"type": "success", "content": "已发送专家选择新卡片，请在新卡上继续。"}}
+            repository.update(task_id, message_id=new_message_id)
+            return {"toast": {"type": "success", "content": "已进入专家选择，请继续勾选。"}}
         except Exception as exc:
             return {"toast": {"type": "error", "content": f"进入专家选择失败：{str(exc)[:120]}"}}
 
@@ -603,85 +636,52 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
         return {"toast": {"type": "success", "content": "专家已确认，正在开始讨论。"}}
 
     if op == "show_debate":
-        if record.status != "completed" and not record.result:
-            repository.update(task_id, ui_view_mode="live")
-            if record.message_id:
-                latest = repository.get(task_id) or record
-                feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, latest))
+        latest = repository.get(task_id) or record
+        repository.update(task_id, ui_view_mode="live")
+        latest = repository.get(task_id) or latest
+        if latest.message_id:
+            feishu_client.patch_message_card(latest.message_id, build_live_discussion_card(task_id, latest))
             return {"toast": {"type": "success", "content": "已切换到实时讨论视图。"}}
-
-        rounds = (record.result or {}).get("rounds", [])
-        if rounds and isinstance(rounds[0], dict) and "speeches" in rounds[0]:
-            chunks = []
-            for r in rounds[:2]:
-                first_three = r.get("speeches", [])[:3]
-                speaker_lines = "\n".join([f"- {s['expert']}: {s['content'][:90]}" for s in first_three])
-                chunks.append(f"第{r.get('round', '?')}轮（{r.get('theme', '讨论')}）\n{speaker_lines}")
-            timeline = (record.result or {}).get("interaction_timeline", [])
-            timeline_hint = "\n".join(
-                [
-                    f"- 第{t.get('round','?')}轮：{t.get('from','专家')} -> {t.get('to','专家')}"
-                    for t in timeline[:4]
-                ]
-            )
-            summary = ("互动关系：\n" + timeline_hint + "\n\n" + "\n\n".join(chunks)).strip()
-        else:
-            summary = "\n\n".join(
-                [
-                    f"第{r['round']}轮\n- 研究员：{r['researcher'][:120]}\n- 执行者：{r['executor'][:120]}\n- 批判者：{r['critic'][:120]}"
-                    for r in rounds[:2]
-                ]
-            )
-        # 讨论结束后，细节以“新卡片”展示，保留结果卡不被覆盖。
-        detail_card = {
-            "config": {"update_multi": True},
-            "header": {
-                "title": {"tag": "plain_text", "content": "讨论细节摘要"},
-                "subtitle": {"tag": "plain_text", "content": f"任务编号：{task_id[:8]}"},
-                "template": "purple",
-            },
-            "elements": [
-                {"tag": "markdown", "content": summary[:2600] or "暂无讨论细节"},
-            ],
-        }
-        try:
-            feishu_client.send_card(record.chat_id, detail_card, receive_id_type="chat_id")
-            return {"toast": {"type": "success", "content": "已发送讨论细节卡片。"}}
-        except Exception as exc:
-            return {"toast": {"type": "error", "content": f"发送讨论细节卡失败：{str(exc)[:120]}"}}
+        return {"toast": {"type": "warning", "content": "未找到可更新的任务卡片。"}}
 
     if op == "show_result_summary":
-        if not record.result:
+        latest = repository.get(task_id) or record
+        if not latest.result:
+            if latest.message_id:
+                repository.update(task_id, ui_view_mode="progress")
+                feishu_client.patch_message_card(
+                    latest.message_id,
+                    build_progress_card(task_id, "discussion", "讨论进行中，实时内容仍在生成。你也可以切到实时辩论查看。"),
+                )
+                return {"toast": {"type": "info", "content": "讨论还在进行，已切回进度摘要。"}}
             return {"toast": {"type": "warning", "content": "结果还没生成完成，请稍等。"}}
-        if record.message_id:
+        if latest.message_id:
             repository.update(task_id, ui_view_mode="summary")
-            feishu_client.patch_message_card(record.message_id, build_result_card(task_id, record.result))
+            feishu_client.patch_message_card(latest.message_id, build_result_card(task_id, latest.result))
             return {"toast": {"type": "success", "content": "已切换到结果摘要。"}}
         return {"toast": {"type": "warning", "content": "未找到可更新的任务卡片。"}}
 
     if op == "show_full_report":
-        if record.message_id and record.result:
-            # 讨论完成后，完整讨论以新卡片发送，避免覆盖结果主卡。
-            try:
-                full_card = build_full_report_card(task_id, record.result)
-                feishu_client.send_card(record.chat_id, full_card, receive_id_type="chat_id")
-                return {"toast": {"type": "success", "content": "已发送完整讨论卡片。"}}
-            except Exception as exc:
-                return {"toast": {"type": "error", "content": f"发送完整讨论卡失败：{str(exc)[:120]}"}}
-        if record.message_id:
+        latest = repository.get(task_id) or record
+        if latest.result and latest.message_id:
+            repository.update(task_id, ui_view_mode="full")
+            feishu_client.patch_message_card(latest.message_id, build_full_report_card(task_id, latest.result))
+            return {"toast": {"type": "success", "content": "已切换到完整讨论记录。"}}
+        if latest.message_id:
             repository.update(task_id, ui_view_mode="live")
-            feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, record))
-        return {"toast": {"type": "info", "content": "任务尚未完成，先展示实时讨论内容。"}}
+            feishu_client.patch_message_card(latest.message_id, build_live_discussion_card(task_id, latest))
+            return {"toast": {"type": "info", "content": "任务尚未完成，先展示实时讨论内容。"}}
+        return {"toast": {"type": "warning", "content": "未找到可更新的任务卡片。"}}
 
     if op == "back_to_summary":
         repository.update(task_id, ui_view_mode="progress")
-        if record.message_id and record.result:
-            feishu_client.patch_message_card(record.message_id, build_result_card(task_id, record.result))
+        latest = repository.get(task_id) or record
+        if latest.message_id and latest.result:
+            feishu_client.patch_message_card(latest.message_id, build_result_card(task_id, latest.result))
             return {"toast": {"type": "success", "content": "已返回结果摘要"}}
-        if record.message_id:
-            latest = repository.get(task_id) or record
+        if latest.message_id:
             feishu_client.patch_message_card(
-                record.message_id,
+                latest.message_id,
                 build_progress_card(task_id, "discussion", f"任务进行中，已记录 {len(latest.live_transcript or [])} 条实时讨论内容。"),
             )
         return {"toast": {"type": "info", "content": "任务尚未完成，已返回进度卡片。"}}
@@ -696,6 +696,9 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
                 build_progress_card(task_id, "failed", "已收到停止指令，正在终止讨论流程。"),
             )
         return {"toast": {"type": "success", "content": "已发送停止指令，讨论将尽快终止。"}}
+
+    if op == "continue_topic":
+        return {"toast": {"type": "info", "content": "好的，请直接发送你的新话题，我会继续为你组织讨论。"}}
 
     if op == "rerun_judge":
         if record.status != "completed" or not record.result:
