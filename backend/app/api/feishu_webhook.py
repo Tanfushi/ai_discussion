@@ -34,21 +34,43 @@ def _stage_cn(stage: str) -> str:
     return mapping.get(stage, stage)
 
 
+def _stage_badge(stage: str) -> str:
+    mapping = {
+        "queued": "✅ 已接收",
+        "planning": "🧩 任务拆解中",
+        "discussion": "🧠 深度思考中",
+        "judge": "📌 综合裁决中",
+        "panel_mode": "🧠 深度思考中",
+        "goal_understanding": "🔎 理解议题中",
+        "panel_setup": "👥 组建专家中",
+        "round_1": "💬 第一轮讨论中",
+        "round_2": "⚔️ 第二轮辩论中",
+        "round_3": "🧠 第三轮综合中",
+        "deep_focus": "🔬 深度聚焦中",
+        "final_report": "📝 生成报告中",
+        "done": "🎯 已完成",
+        "failed": "❌ 执行失败",
+        "cancelled": "⏹️ 已停止",
+    }
+    return mapping.get(stage, "🧠 处理中")
+
+
 def build_progress_card(task_id: str, stage: str, detail: str) -> dict:
     return {
         "config": {"update_multi": True},
         "header": {
             "title": {"tag": "plain_text", "content": "多机器人协作面板"},
-            "subtitle": {"tag": "plain_text", "content": f"任务编号：{task_id[:8]}"},
+            "subtitle": {"tag": "plain_text", "content": f"{_stage_badge(stage)}｜任务编号：{task_id[:8]}"},
             "template": "indigo",
         },
         "elements": [
-            {"tag": "markdown", "content": f"**当前阶段**：`{_stage_cn(stage)}`\n\n{detail}"},
+            {"tag": "markdown", "content": f"**状态回执**：{_stage_badge(stage)}\n\n**当前阶段**：`{_stage_cn(stage)}`\n\n{detail}"},
             {
                 "tag": "action",
                 "actions": [
                     {"tag": "button", "text": {"tag": "plain_text", "content": "重新裁决"}, "type": "default", "value": {"action": "rerun_judge", "task_id": task_id}},
-                    {"tag": "button", "text": {"tag": "plain_text", "content": "查看讨论细节"}, "type": "default", "value": {"action": "show_debate", "task_id": task_id}},
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "实时辩论（同步生成）"}, "type": "default", "value": {"action": "show_debate", "task_id": task_id}},
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "查看结果摘要"}, "type": "primary", "value": {"action": "show_result_summary", "task_id": task_id}},
                     {"tag": "button", "text": {"tag": "plain_text", "content": "查看完整讨论"}, "type": "default", "value": {"action": "show_full_report", "task_id": task_id}},
                     {"tag": "button", "text": {"tag": "plain_text", "content": "停止讨论"}, "type": "danger", "value": {"action": "stop_task", "task_id": task_id}},
                 ],
@@ -57,11 +79,19 @@ def build_progress_card(task_id: str, stage: str, detail: str) -> dict:
     }
 
 
-def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
+def build_expert_selection_card(task_id: str, selected_keys: list[str], page: int = 0) -> dict:
     catalog = expert_catalog()
+    entries = list(catalog.items())
+    page_size = 9
+    total_pages = max(1, (len(entries) + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+    start = page * page_size
+    end = start + page_size
+    page_entries = entries[start:end]
+
     selected_names = []
     toggle_actions = []
-    for key, expert in list(catalog.items())[:12]:
+    for key, expert in page_entries:
         is_easter = key.startswith("easter_")
         role_type = "彩蛋角色🎊" if is_easter else "专家角色"
         selected = key in selected_keys
@@ -76,6 +106,9 @@ def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
                 "value": {"action": "toggle_expert", "task_id": task_id, "expert_key": key},
             }
         )
+    for key, expert in entries:
+        if key in selected_keys:
+            selected_names.append(expert.name)
     picked = len(selected_keys)
     selected_text = "、".join(selected_names) if selected_names else "暂无"
 
@@ -97,10 +130,28 @@ def build_expert_selection_card(task_id: str, selected_keys: list[str]) -> dict:
                 "content": (
                     "请点击下方按钮勾选/取消角色，建议选择 3-5 位。\n"
                     "你也可以勾选彩蛋角色（如哆啦A梦🐱、蜡笔小新🖍️）参与讨论，会更可爱更有梗。\n\n"
-                    f"**当前已选（{picked}）**：{selected_text}"
+                    f"**当前已选（{picked}）**：{selected_text}\n"
+                    f"**角色页码**：第 {page + 1}/{total_pages} 页"
                 ),
             },
             *action_rows,
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "上一页"},
+                        "type": "default",
+                        "value": {"action": "change_expert_page", "task_id": task_id, "page_delta": -1},
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "下一页"},
+                        "type": "default",
+                        "value": {"action": "change_expert_page", "task_id": task_id, "page_delta": 1},
+                    },
+                ],
+            },
             {
                 "tag": "action",
                 "actions": [
@@ -291,11 +342,12 @@ def build_live_discussion_card(task_id: str, record) -> dict:
     recent_text = "\n".join([f"- {line}" for line in transcript[-15:]]) or "暂无实时发言内容"
     recent_stage = "\n".join([f"- {line}" for line in stage_logs[-6:]]) or "暂无阶段日志"
     status_text = "已停止" if record.cancelled else ("进行中" if record.status == "running" else record.status)
+    status_key = "cancelled" if record.cancelled else ("discussion" if record.status == "running" else record.status)
     return {
         "config": {"update_multi": True},
         "header": {
             "title": {"tag": "plain_text", "content": "讨论实时查看"},
-            "subtitle": {"tag": "plain_text", "content": f"任务编号：{task_id[:8]}｜状态：{status_text}"},
+            "subtitle": {"tag": "plain_text", "content": f"{_stage_badge(status_key)}｜任务编号：{task_id[:8]}"},
             "template": "orange",
         },
         "elements": [
@@ -358,12 +410,32 @@ def _process_task(task_id: str) -> None:
             logs.append(f"{_stage_cn(stage)}：{detail}")
             repository.update(task_id, stage_logs=logs[-20:])
         if record.message_id:
-            feishu_client.patch_message_card(record.message_id, build_progress_card(task_id, stage, detail))
+            current = repository.get(task_id) or record
+            if current.ui_view_mode == "live":
+                feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, current))
+            else:
+                feishu_client.patch_message_card(record.message_id, build_progress_card(task_id, stage, detail))
+
+    def on_transcript(line: str) -> None:
+        latest = repository.get(task_id)
+        if not latest or not record.message_id:
+            return
+        # 用户打开实时视图后，按发言流式刷新卡片，接近“深度思考同步生成”效果。
+        if latest.ui_view_mode == "live":
+            feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, latest))
 
     try:
-        result = engine.execute_task(task_id, on_stage=on_stage)
+        result = engine.execute_task(task_id, on_stage=on_stage, on_transcript=on_transcript)
+        latest = repository.get(task_id) or record
         if record.message_id:
-            feishu_client.patch_message_card(record.message_id, build_result_card(task_id, result))
+            # 不自动跳转到结果卡。只更新当前视图状态，结果由用户点击查看。
+            if latest.ui_view_mode == "live":
+                feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, latest))
+            else:
+                feishu_client.patch_message_card(
+                    record.message_id,
+                    build_progress_card(task_id, "done", "讨论已完成。点击“查看结果摘要”或“查看完整讨论”查看内容。"),
+                )
     except Exception as exc:
         latest = repository.get(task_id)
         if latest and latest.cancelled:
@@ -420,7 +492,14 @@ async def feishu_webhook(request: Request, background_tasks: BackgroundTasks):
         return {"ok": True, "task_id": record.task_id, "deduped": True}
 
     # 先确认用户输入是否真的是讨论议题，避免“你好”也直接开会。
-    repository.update(task_id, waiting_goal_confirmation=True, waiting_expert_selection=False, selected_expert_keys=[])
+    repository.update(
+        task_id,
+        waiting_goal_confirmation=True,
+        waiting_expert_selection=False,
+        selected_expert_keys=[],
+        selection_page=0,
+            ui_view_mode="progress",
+    )
     confirmation_card = build_goal_confirmation_card(task_id, text)
     try:
         message_id = feishu_client.send_card(chat_id, confirmation_card, receive_id_type="chat_id")
@@ -454,17 +533,31 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
             selected.append(expert_key)
         repository.update(task_id, selected_expert_keys=selected)
         if record.message_id:
-            feishu_client.patch_message_card(record.message_id, build_expert_selection_card(task_id, selected))
+            feishu_client.patch_message_card(
+                record.message_id,
+                build_expert_selection_card(task_id, selected, record.selection_page),
+            )
         return {"toast": {"type": "info", "content": f"当前已选 {len(selected)} 位"}}
 
+    if op == "change_expert_page":
+        delta = int(action.get("page_delta", 0))
+        new_page = max(0, (record.selection_page or 0) + delta)
+        repository.update(task_id, selection_page=new_page)
+        latest = repository.get(task_id) or record
+        if record.message_id:
+            feishu_client.patch_message_card(
+                record.message_id,
+                build_expert_selection_card(task_id, latest.selected_expert_keys or [], latest.selection_page),
+            )
+        return {"toast": {"type": "info", "content": f"已切换到第 {new_page + 1} 页"}}
+
     if op == "confirm_goal":
-        repository.update(task_id, waiting_goal_confirmation=False, waiting_expert_selection=True)
-        selection_card = build_expert_selection_card(task_id, record.selected_expert_keys or [])
+        repository.update(task_id, waiting_goal_confirmation=False, waiting_expert_selection=True, selection_page=0)
+        selection_card = build_expert_selection_card(task_id, record.selected_expert_keys or [], 0)
         try:
-            # 用“新发一张卡”替代 patch，规避不同客户端对旧卡更新的兼容问题。
-            new_message_id = feishu_client.send_card(record.chat_id, selection_card, receive_id_type="chat_id")
-            repository.update(task_id, message_id=new_message_id)
-            return {"toast": {"type": "success", "content": "已进入专家选择，请在新卡片中勾选专家。"}}
+            if record.message_id:
+                feishu_client.patch_message_card(record.message_id, selection_card)
+            return {"toast": {"type": "success", "content": "已进入专家选择，请继续勾选。"}}
         except Exception as exc:
             return {"toast": {"type": "error", "content": f"进入专家选择失败：{str(exc)[:120]}"}}
 
@@ -491,7 +584,7 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
         if record.waiting_goal_confirmation:
             return {"toast": {"type": "warning", "content": "请先确认讨论议题，再选择专家。"}}
         selected = list(record.selected_expert_keys or [])
-        repository.update(task_id, selected_expert_keys=selected)
+        repository.update(task_id, selected_expert_keys=selected, ui_view_mode="progress")
         if len(selected) < 3:
             return {"toast": {"type": "warning", "content": "请至少选择3位专家再开始讨论。"}}
         if len(selected) > 5:
@@ -507,8 +600,10 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
 
     if op == "show_debate":
         if record.status != "completed" and not record.result:
+            repository.update(task_id, ui_view_mode="live")
             if record.message_id:
-                feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, record))
+                latest = repository.get(task_id) or record
+                feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, latest))
             return {"toast": {"type": "success", "content": "已切换到实时讨论视图。"}}
 
         rounds = (record.result or {}).get("rounds", [])
@@ -551,6 +646,15 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
         except Exception as exc:
             return {"toast": {"type": "error", "content": f"发送讨论细节卡失败：{str(exc)[:120]}"}}
 
+    if op == "show_result_summary":
+        if not record.result:
+            return {"toast": {"type": "warning", "content": "结果还没生成完成，请稍等。"}}
+        if record.message_id:
+            repository.update(task_id, ui_view_mode="summary")
+            feishu_client.patch_message_card(record.message_id, build_result_card(task_id, record.result))
+            return {"toast": {"type": "success", "content": "已切换到结果摘要。"}}
+        return {"toast": {"type": "warning", "content": "未找到可更新的任务卡片。"}}
+
     if op == "show_full_report":
         if record.message_id and record.result:
             # 讨论完成后，完整讨论以新卡片发送，避免覆盖结果主卡。
@@ -561,10 +665,12 @@ async def card_callback(request: Request, background_tasks: BackgroundTasks):
             except Exception as exc:
                 return {"toast": {"type": "error", "content": f"发送完整讨论卡失败：{str(exc)[:120]}"}}
         if record.message_id:
+            repository.update(task_id, ui_view_mode="live")
             feishu_client.patch_message_card(record.message_id, build_live_discussion_card(task_id, record))
         return {"toast": {"type": "info", "content": "任务尚未完成，先展示实时讨论内容。"}}
 
     if op == "back_to_summary":
+        repository.update(task_id, ui_view_mode="progress")
         if record.message_id and record.result:
             feishu_client.patch_message_card(record.message_id, build_result_card(task_id, record.result))
             return {"toast": {"type": "success", "content": "已返回结果摘要"}}

@@ -183,7 +183,14 @@ def run_expert_panel(
         on_stage("panel_setup", "正在组建3-5位互补专家。")
     experts = experts_by_keys(selected_expert_keys or [])
     if len(experts) < 3:
-        experts = _build_expert_panel(query, model_planner)
+        auto_experts = _build_expert_panel(query, model_planner)
+        existing_names = {e.name for e in experts}
+        for auto_expert in auto_experts:
+            if auto_expert.name not in existing_names:
+                experts.append(auto_expert)
+                existing_names.add(auto_expert.name)
+            if len(experts) >= 3:
+                break
     if on_transcript:
         on_transcript("【系统】已确认专家阵容：" + "、".join([e.name for e in experts]))
 

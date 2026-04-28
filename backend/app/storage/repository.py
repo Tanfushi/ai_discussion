@@ -17,10 +17,12 @@ class TaskRecord:
     retries: int = 0
     stage_logs: list[str] = field(default_factory=list)
     selected_expert_keys: list[str] = field(default_factory=list)
+    selection_page: int = 0
     waiting_goal_confirmation: bool = False
     waiting_expert_selection: bool = False
     cancelled: bool = False
     live_transcript: list[str] = field(default_factory=list)
+    ui_view_mode: str = "progress"
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 

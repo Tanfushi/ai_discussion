@@ -8,13 +8,19 @@ from app.storage.repository import repository
 
 
 StageCallback = Callable[[str, str], None]
+TranscriptCallback = Callable[[str], None]
 
 
 class OrchestratorEngine:
     def __init__(self) -> None:
         self.settings = get_settings()
 
-    def execute_task(self, task_id: str, on_stage: StageCallback | None = None) -> dict:
+    def execute_task(
+        self,
+        task_id: str,
+        on_stage: StageCallback | None = None,
+        on_transcript: TranscriptCallback | None = None,
+    ) -> dict:
         record = repository.get(task_id)
         if not record:
             raise ValueError(f"Task not found: {task_id}")
@@ -23,7 +29,8 @@ class OrchestratorEngine:
             raise RuntimeError("任务已被用户取消")
 
         repository.update(task_id, status="running")
-        use_expert_panel = should_use_expert_panel(record.query)
+        # 只要用户在流程里选择了专家，就强制走专家面板，不回落到默认三角色。
+        use_expert_panel = bool(record.selected_expert_keys) or should_use_expert_panel(record.query)
         if on_stage:
             if use_expert_panel:
                 on_stage("panel_mode", "检测到深度分析目标，切换到专家组深度讨论模式。")
@@ -39,6 +46,8 @@ class OrchestratorEngine:
                     transcript = list(latest.live_transcript or [])
                     transcript.append(line)
                     repository.update(task_id, live_transcript=transcript[-80:])
+                    if on_transcript:
+                        on_transcript(line)
 
                 def should_stop() -> bool:
                     latest = repository.get(task_id)
